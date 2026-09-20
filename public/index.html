@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="uz" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#187b56">
+  <meta name="description" content="11-B sinfining sentyabrdan maygacha fond to‘lovlari. Sodda, tartibli va tushunarli jadval.">
+  <title>11-B fond · To‘lovlar jadvali</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#payment-table">Jadvalga o‘tish</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="/" class="brand" aria-label="11-B fond bosh sahifa">
+        <span class="brand-mark" data-icon="sheet"></span>
+        <span>11-B<span class="brand-divider"></span><span class="brand-secondary">fond</span></span>
+      </a>
+      <nav aria-label="Asosiy menyu" class="main-nav">
+        <a class="nav-item active" href="#payment-table"><span data-icon="grid"></span>To‘lovlar</a>
+        <button class="nav-item" id="activity-button"><span data-icon="history"></span>Faollik</button>
+      </nav>
+      <div class="header-actions">
+        <span id="access-badge" class="access-badge"><span data-icon="lock"></span><span>Faqat ko‘rish</span></span>
+        <div class="theme-toggle" role="group" aria-label="Rang rejimi">
+          <button data-theme-choice="light" aria-label="Yorug‘ rejim" title="Yorug‘ rejim" aria-pressed="true"><span data-icon="sun"></span></button>
+          <button data-theme-choice="dark" aria-label="Tungi rejim" title="Tungi rejim" aria-pressed="false"><span data-icon="moon"></span></button>
+        </div>
+        <button class="button button-primary admin-button" id="admin-button"><span data-icon="shield"></span><span>Admin kirish</span></button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="breadcrumb"><span data-icon="home"></span><span>11-B sinf</span><span class="breadcrumb-slash">/</span><span>Fond nazorati</span></div>
+    <section class="page-heading" aria-labelledby="page-title">
+      <div><div class="heading-line"><h1 id="page-title">Sinf fondi</h1><span class="class-tag">11-B</span></div><p>To‘lovlar tartibda. Hammasi bir joyda.</p></div>
+      <div class="page-actions">
+        <div class="year-picker"><span data-icon="calendar"></span><label class="sr-only" for="year-select">O‘quv yili</label><select id="year-select" disabled><option>O‘quv yili</option></select><span class="select-chevron" data-icon="chevron"></span></div>
+        <button class="button button-white" id="export-button" disabled><span data-icon="download"></span><span>Excelga yuklash</span></button>
+      </div>
+    </section>
+
+    <section class="summary-grid" aria-label="Tanlangan oy statistikasi">
+      <article class="summary-card"><div class="summary-label">Jami o‘quvchilar<span class="stat-icon gray" data-icon="users"></span></div><div class="stat-value"><span id="total-count">—</span><span>nafar</span></div><div class="stat-note"><span class="mini-dot"></span>Bir sinf, bir jamoa</div></article>
+      <article class="summary-card"><div class="summary-label">To‘langan<span class="stat-icon green" data-icon="check-circle"></span></div><div class="stat-value"><span id="paid-count">—</span><span>nafar</span></div><div class="stat-note"><span class="mini-dot green-dot"></span><span class="summary-month">Sentyabr</span> oyi uchun</div></article>
+      <article class="summary-card"><div class="summary-label">To‘lanmagan<span class="stat-icon amber" data-icon="clock"></span></div><div class="stat-value"><span id="unpaid-count">—</span><span>nafar</span></div><div class="stat-note"><span class="mini-dot amber-dot"></span><span class="summary-month">Sentyabr</span> oyi uchun</div></article>
+      <article class="summary-card progress-card"><div class="summary-label">Oylik natija<span class="stat-icon green" data-icon="chart"></span></div><div class="stat-value"><span id="percentage">—</span><span>%</span></div><div class="progress-track" role="progressbar" aria-label="Oylik to‘lov natijasi" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progress-fill"></div></div><div class="progress-caption"><span id="progress-caption">Ma’lumot yuklanmoqda</span><span class="summary-month">Sentyabr</span></div></article>
+    </section>
+
+    <section class="spreadsheet" aria-labelledby="table-title">
+      <div class="sheet-heading"><div class="sheet-title"><span class="sheet-title-icon" data-icon="sheet"></span><h2 id="table-title">To‘lovlar jadvali</h2><span class="count-tag" id="member-tag">25 o‘quvchi</span></div><div class="save-state" id="save-state" role="status"><span class="mini-dot green-dot"></span><span>Yuklanmoqda…</span></div></div>
+      <div class="sheet-toolbar">
+        <div class="search-box"><span data-icon="search"></span><label class="sr-only" for="member-search">O‘quvchini qidirish</label><input id="member-search" type="search" placeholder="Ism yoki familiya bo‘yicha qidirish…" autocomplete="off"><span class="search-key" aria-hidden="true">/</span></div>
+        <div class="filter-controls"><div class="month-picker"><span class="filter-label">Oy:</span><label class="sr-only" for="month-select">Hisobot va filtr oyi</label><select id="month-select" disabled><option>Sentyabr</option></select><span class="select-chevron" data-icon="chevron"></span></div><div class="status-filters" role="group" aria-label="Tanlangan oydagi to‘lov holati"><button class="selected" data-filter="all" aria-pressed="true">Barchasi</button><button data-filter="paid" aria-pressed="false">To‘langan</button><button data-filter="unpaid" aria-pressed="false">To‘lanmagan</button></div></div>
+      </div>
+      <div class="mobile-scroll-hint"><span data-icon="move"></span>Barcha oylarni ko‘rish uchun jadvalni suring</div>
+      <div class="table-scroll" id="table-scroll" tabindex="0" role="region" aria-label="Sentyabrdan maygacha fond jadvali">
+        <table id="payment-table"><caption class="sr-only">11-B sinf o‘quvchilarining oylik fond to‘lovlari. Tahrirlash uchun admin sifatida kiring.</caption><colgroup><col class="number-col"><col class="name-col"><col span="9" class="month-col"></colgroup><thead id="table-head"></thead><tbody id="table-body"><tr><td colspan="11" class="empty-state"><span class="loading-spinner"></span><p>Jadval yuklanmoqda…</p></td></tr></tbody><tfoot id="table-foot"></tfoot></table>
+      </div>
+      <div class="sheet-footer"><span id="visible-count">25 ta o‘quvchi</span><div class="legend"><span><i class="mini-dot green-dot"></i>To‘langan</span><span><i class="mini-dot amber-dot"></i>To‘lanmagan</span></div><span class="period-label"><span data-icon="calendar"></span>Sentyabr — May</span></div>
+    </section>
+
+    <div class="info-note" id="info-note"><span data-icon="info"></span><p>Jadvalni hamma ko‘rishi mumkin. To‘lov holatini faqat admin o‘zgartiradi.</p><button id="help-button">Qanday ishlaydi?<span data-icon="arrow-right"></span></button></div>
+    <footer class="page-footer"><span><strong>11-B fond</strong><span class="footer-dot">·</span>Birgalikda, tartib bilan.</span><span id="school-year-footer">2026–2027 o‘quv yili</span></footer>
+  </main>
+
+  <dialog id="login-dialog" class="modal compact-modal" aria-labelledby="login-title">
+    <button class="dialog-close icon-button" data-close-dialog aria-label="Yopish"><span data-icon="x"></span></button><span class="modal-symbol" data-icon="shield"></span><p class="eyebrow">11-B FOND</p><h2 id="login-title">Admin sifatida kirish</h2><p class="modal-description">To‘lovlarni boshqarish uchun shaxsiy parolingizni kiriting.</p>
+    <form id="login-form"><label for="admin-password">Admin paroli</label><div class="password-input"><input id="admin-password" name="password" type="password" required maxlength="128" autocomplete="current-password" placeholder="Parolingizni kiriting"><button type="button" class="icon-button" data-reveal="admin-password" aria-label="Parolni ko‘rsatish"><span data-icon="eye"></span></button></div><p id="login-error" class="form-error" role="alert"></p><button class="button button-primary form-submit" type="submit"><span data-icon="unlock"></span>Kirish</button></form><div class="modal-footnote"><span data-icon="lock"></span>Faqat sinf fondi mas’uli uchun</div>
+  </dialog>
+
+  <dialog id="account-dialog" class="modal compact-modal" aria-labelledby="account-title"><button class="dialog-close icon-button" data-close-dialog aria-label="Yopish"><span data-icon="x"></span></button><span class="modal-symbol" data-icon="shield"></span><p class="eyebrow">BOSHQARUV</p><h2 id="account-title">Admin hisobi</h2><p class="modal-description">Siz to‘lovlar jadvalini tahrirlay olasiz. O‘zgarishlar avtomatik saqlanadi.</p><button class="button button-white account-action" id="change-password-button"><span data-icon="key"></span>Parolni almashtirish<span data-icon="arrow-right"></span></button><button class="button logout-button account-action" id="logout-button"><span data-icon="log-out"></span>Hisobdan chiqish</button></dialog>
+
+  <dialog id="password-dialog" class="modal compact-modal" aria-labelledby="password-title"><button class="dialog-close icon-button" data-close-dialog aria-label="Yopish"><span data-icon="x"></span></button><span class="modal-symbol" data-icon="key"></span><h2 id="password-title">Yangi parol</h2><p class="modal-description">Kamida 12 belgidan iborat, faqat o‘zingiz biladigan parol tanlang.</p><form id="password-form"><label for="current-password">Joriy parol</label><input id="current-password" type="password" autocomplete="current-password" required maxlength="128"><label for="new-password">Yangi parol</label><input id="new-password" type="password" autocomplete="new-password" required minlength="12" maxlength="128"><label for="confirm-password">Yangi parolni takrorlang</label><input id="confirm-password" type="password" autocomplete="new-password" required minlength="12" maxlength="128"><p class="form-error" id="password-error" role="alert"></p><button type="submit" class="button button-primary form-submit">Parolni saqlash</button></form></dialog>
+
+  <dialog id="activity-dialog" class="modal activity-modal" aria-labelledby="activity-title"><div class="modal-top"><div><p class="eyebrow">O‘ZGARISHLAR TARIXI</p><h2 id="activity-title">So‘nggi faollik</h2></div><button class="icon-button" data-close-dialog aria-label="Yopish"><span data-icon="x"></span></button></div><p class="modal-description" id="activity-description">To‘lovlardagi so‘nggi 100 ta o‘zgarish.</p><div id="activity-list" class="activity-list"></div></dialog>
+
+  <dialog id="help-dialog" class="modal compact-modal" aria-labelledby="help-title"><button class="dialog-close icon-button" data-close-dialog aria-label="Yopish"><span data-icon="x"></span></button><span class="modal-symbol" data-icon="sheet"></span><h2 id="help-title">Hammasi oddiy</h2><div class="help-step"><span>1</span><div><strong>Jadvalni ko‘ring</strong><p>Har bir qatorda bitta o‘quvchi, ustunlarda sentyabrdan maygacha oylar bor.</p></div></div><div class="help-step"><span>2</span><div><strong>Kerakli oyni tanlang</strong><p>Oy tanlovi yuqoridagi natijalar va holat filtriga ta’sir qiladi. Qidiruv lotin va kirill yozuvlarida ishlaydi.</p></div></div><div class="help-step"><span>3</span><div><strong>Admin bo‘lib boshqaring</strong><p>Parol bilan kirib, katakdagi “To‘langan” yoki “To‘lanmagan” holatini tanlang. Har bir o‘zgarish avtomatik saqlanadi.</p></div></div><div class="help-step"><span>4</span><div><strong>Excelga yuklab oling</strong><p>Tanlangan o‘quv yilining to‘liq jadvali Excelda ochiladigan CSV faylga saqlanadi.</p></div></div></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <noscript><div class="noscript">Jadvalni ishlatish uchun brauzerda JavaScriptni yoqing.</div></noscript>
+</body>
+</html>
