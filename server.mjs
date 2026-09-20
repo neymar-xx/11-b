@@ -1,5 +1,4 @@
 import http from "node:http";
-import { DatabaseSync } from "node:sqlite";
 import {
   randomBytes,
   scrypt as scryptCallback,
@@ -8,16 +7,15 @@ import {
 } from "node:crypto";
 import { promisify } from "node:util";
 import {
-  mkdirSync,
   writeFileSync,
   readFileSync,
   existsSync,
-  unlinkSync,
-  chmodSync
+  unlinkSync
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { members, months, schoolYear } from "./lib/roster.mjs";
+import { openDatabase, configurationError } from "./lib/database.mjs";
 
 const scrypt = promisify(scryptCallback);
 const root = path.dirname(fileURLToPath(import.meta.url));
@@ -39,18 +37,13 @@ async function passwordMatches(password, stored) {
 }
 
 export async function createApp(options = {}) {
-  const dataDir =
-    options.dataDir || process.env.DATA_DIR || path.join(root, ".data");
+  const serverless = options.serverless ?? process.env.VERCEL === '1';
   const secureCookie =
-    options.secureCookie ?? process.env.COOKIE_SECURE === "true";
+    options.secureCookie ?? (serverless || process.env.COOKIE_SECURE === "true");
   const appOrigin = options.appOrigin || process.env.APP_ORIGIN;
-  mkdirSync(dataDir, { recursive: true, mode: 0o700 });
-  const databasePath = path.join(dataDir, "fond.sqlite");
-  const db = new DatabaseSync(databasePath);
-  chmodSync(databasePath, 0o600);
-  db.exec(`
-    PRAGMA journal_mode = WAL;
-    PRAGMA busy_timeout = 5000;
+  const { db, bootstrapPath, remote } = await openDatabase(options);
+  try {
+  await db.batch(`
     CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS payments (
       year INTEGER NOT NULL, member_id TEXT NOT NULL, month TEXT NOT NULL,
@@ -62,43 +55,40 @@ export async function createApp(options = {}) {
       id INTEGER PRIMARY KEY AUTOINCREMENT, year INTEGER NOT NULL,
       member_id TEXT NOT NULL, month TEXT NOT NULL, paid INTEGER NOT NULL, created_at TEXT NOT NULL
     );
-  `);
+    CREATE TABLE IF NOT EXISTS auth_attempts (
+      key TEXT PRIMARY KEY, count INTEGER NOT NULL, until INTEGER NOT NULL
+    );
+  `.split(';').map((sql) => sql.trim()).filter(Boolean));
 
-  const bootstrapPath = path.join(dataDir, "admin-password.txt");
   if (
-    !db.prepare("SELECT value FROM settings WHERE key = 'admin_hash'").get()
+    !(await db.prepare("SELECT value FROM settings WHERE key = 'admin_hash'").get())
   ) {
     const supplied = options.adminPassword || process.env.ADMIN_PASSWORD;
+    if (remote && !supplied)
+      throw configurationError('ADMIN_NOT_CONFIGURED', 'Yangi baza uchun ADMIN_PASSWORD sozlanishi kerak (12–128 belgi).');
     if (supplied && (supplied.length < 12 || supplied.length > 128)) {
-      db.close();
-      throw new Error("ADMIN_PASSWORD 12–128 belgidan iborat bo‘lishi kerak.");
+      throw configurationError('ADMIN_NOT_CONFIGURED', "ADMIN_PASSWORD 12–128 belgidan iborat bo‘lishi kerak.");
     }
     const password = supplied || randomBytes(18).toString("base64url");
-    db.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run(
+    const inserted = await db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)").run(
       "admin_hash",
       await passwordHash(password)
     );
-    if (!supplied)
+    if (!supplied && bootstrapPath && inserted.rowsAffected)
       writeFileSync(
         bootstrapPath,
         `11-B fond — admin uchun boshlang‘ich parol\n\n${password}\n\nSaytga kirgach, admin menyusidan parolni almashtiring.\n`,
         { mode: 0o600 }
       );
   }
+  } catch (error) {
+    db.close();
+    throw error;
+  }
 
-  const attempts = new Map();
-  let globalAttempts = { count: 0, until: 0 };
-  const cleanup = setInterval(() => {
-    const now = Date.now();
-    db.prepare("DELETE FROM sessions WHERE expires_at <= ?").run(now);
-    for (const [ip, attempt] of attempts)
-      if (attempt.until <= now) attempts.delete(ip);
-  }, 60_000).unref();
-
-  const currentHash = () =>
-    db.prepare("SELECT value FROM settings WHERE key = 'admin_hash'").get()
-      .value;
-  function session(req) {
+  const currentHash = async (connection = db) =>
+    (await connection.prepare("SELECT value FROM settings WHERE key = 'admin_hash'").get()).value;
+  async function session(req, connection = db) {
     const token = (req.headers.cookie || "")
       .split(";")
       .map((part) => part.trim())
@@ -106,7 +96,7 @@ export async function createApp(options = {}) {
       ?.slice(13);
     if (!token || !/^[a-f0-9]{64}$/.test(token)) return null;
     return (
-      db
+      await connection
         .prepare(
           "SELECT token_hash, expires_at FROM sessions WHERE token_hash = ? AND expires_at > ?"
         )
@@ -131,6 +121,16 @@ export async function createApp(options = {}) {
       !req.headers["content-type"]?.toLowerCase().startsWith("application/json")
     )
       throw fail(415, "JSON ma’lumot yuboring.");
+    // Vercel may parse the JSON body before calling a Node.js function.
+    if (req.body !== undefined) {
+      const parsed = typeof req.body === 'string' ? (() => {
+        try { return JSON.parse(req.body); } catch { throw fail(400, 'Ma’lumot shakli noto‘g‘ri.'); }
+      })() : req.body;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+        throw fail(400, 'Ma’lumot shakli noto‘g‘ri.');
+      if (Buffer.byteLength(JSON.stringify(parsed)) > 8192) throw fail(413, 'So‘rov juda katta.');
+      return parsed;
+    }
     let size = 0;
     const chunks = [];
     for await (const chunk of req) {
@@ -150,29 +150,32 @@ export async function createApp(options = {}) {
   function validYear(value) {
     return Number.isInteger(value) && value >= 2020 && value <= 2100;
   }
-  function consumeAttempt(req) {
+  const attemptKey = (req) => `ip:${digest(serverless
+    ? String(req.headers['x-vercel-forwarded-for'] || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown').split(',')[0].trim()
+    : req.socket?.remoteAddress || 'unknown')}`;
+  async function consumeAttempt(req) {
     const now = Date.now();
-    const ip = req.socket.remoteAddress;
-    let record = attempts.get(ip);
-    if (!record || record.until <= now)
-      record = { count: 0, until: now + 15 * 60_000 };
-    if (globalAttempts.until <= now)
-      globalAttempts = { count: 0, until: now + 15 * 60_000 };
-    if (record.count >= 5 || globalAttempts.count >= 100)
+    const rows = await db.batch([
+      { sql: 'DELETE FROM auth_attempts WHERE until <= ?', args: [now] },
+      { sql: 'DELETE FROM sessions WHERE expires_at <= ?', args: [now] },
+      ...[attemptKey(req), 'global'].map((key) => ({
+        sql: 'INSERT INTO auth_attempts (key, count, until) VALUES (?, 1, ?) ON CONFLICT(key) DO UPDATE SET count = count + 1 RETURNING count',
+        args: [key, now + 15 * 60_000],
+      })),
+    ]);
+    if (rows[2].rows[0].count > 5 || rows[3].rows[0].count > 100)
       throw fail(
         429,
         "Urinishlar ko‘payib ketdi. 15 daqiqadan keyin qayta urinib ko‘ring."
       );
-    record.count++;
-    globalAttempts.count++;
-    attempts.set(ip, record);
   }
-  function state(year) {
-    const rows = db
-      .prepare(
-        "SELECT member_id, month, paid, version, updated_at FROM payments WHERE year = ?"
-      )
-      .all(year);
+  async function state(year) {
+    const [paymentResult, yearResult, activityResult] = await db.batch([
+      { sql: 'SELECT member_id, month, paid, version, updated_at FROM payments WHERE year = ?', args: [year] },
+      'SELECT DISTINCT year FROM payments',
+      { sql: 'SELECT id, member_id AS memberId, month, paid, created_at AS createdAt FROM activity WHERE year = ? ORDER BY id DESC LIMIT 100', args: [year] },
+    ], 'read');
+    const rows = paymentResult.rows;
     const payments = {};
     for (const row of rows)
       payments[`${row.member_id}:${row.month}`] = {
@@ -181,10 +184,7 @@ export async function createApp(options = {}) {
         updatedAt: row.updated_at
       };
     const currentYear = schoolYear();
-    const storedYears = db
-      .prepare("SELECT DISTINCT year FROM payments")
-      .all()
-      .map((row) => row.year);
+    const storedYears = yearResult.rows.map((row) => row.year);
     return {
       members,
       months,
@@ -200,11 +200,7 @@ export async function createApp(options = {}) {
         ])
       ].sort((a, b) => b - a),
       payments,
-      activity: db
-        .prepare(
-          "SELECT id, member_id AS memberId, month, paid, created_at AS createdAt FROM activity WHERE year = ? ORDER BY id DESC LIMIT 100"
-        )
-        .all(year),
+      activity: activityResult.rows,
       lastUpdated:
         rows
           .map((row) => row.updated_at)
@@ -220,7 +216,7 @@ export async function createApp(options = {}) {
     ["/styles.css", ["styles.css", "text/css; charset=utf-8"]],
     ["/favicon.svg", ["favicon.svg", "image/svg+xml"]]
   ]);
-  const server = http.createServer(async (req, res) => {
+  const handler = async (req, res) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "same-origin");
     res.setHeader("X-Frame-Options", "DENY");
@@ -243,40 +239,42 @@ export async function createApp(options = {}) {
           throw fail(403, "Bu manzildan o‘zgartirishga ruxsat yo‘q.");
       }
       if (url.pathname === "/api/session" && req.method === "GET") {
-        return send(res, 200, { admin: Boolean(session(req)) });
+        return send(res, 200, { admin: Boolean(await session(req)) });
       }
       if (url.pathname === "/api/state" && req.method === "GET") {
         const year = url.searchParams.has("year")
           ? Number(url.searchParams.get("year"))
           : schoolYear();
         if (!validYear(year)) throw fail(400, "O‘quv yili noto‘g‘ri.");
-        return send(res, 200, state(year));
+        return send(res, 200, await state(year));
       }
       if (url.pathname === "/api/login" && req.method === "POST") {
-        consumeAttempt(req);
+        await consumeAttempt(req);
         const { password } = await body(req);
+        const checkedHash = await currentHash();
         if (
           typeof password !== "string" ||
           password.length > 128 ||
-          !(await passwordMatches(password, currentHash()))
+          !(await passwordMatches(password, checkedHash))
         )
           throw fail(401, "Parol noto‘g‘ri. Qayta tekshiring.");
-        attempts.delete(req.socket.remoteAddress);
-        const previous = session(req);
-        if (previous)
-          db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(
-            previous.token_hash
-          );
         const token = randomBytes(32).toString("hex");
-        db.prepare(
-          "INSERT INTO sessions (token_hash, expires_at) VALUES (?, ?)"
-        ).run(digest(token), Date.now() + sessionDuration);
+        const tx = await db.transaction();
+        try {
+          if (await currentHash(tx) !== checkedHash) throw fail(401, 'Parol o‘zgartirilgan. Qayta kiring.');
+          const previous = await session(req, tx);
+          if (previous) await tx.prepare('DELETE FROM sessions WHERE token_hash = ?').run(previous.token_hash);
+          await tx.prepare('INSERT INTO sessions (token_hash, expires_at) VALUES (?, ?)').run(digest(token), Date.now() + sessionDuration);
+          await tx.prepare('DELETE FROM auth_attempts WHERE key = ?').run(attemptKey(req));
+          await tx.commit();
+        } catch (error) { await tx.rollback(); throw error; }
+        finally { tx.close(); }
         return send(res, 200, { admin: true }, { "Set-Cookie": cookie(token) });
       }
       if (url.pathname === "/api/logout" && req.method === "POST") {
-        const active = session(req);
+        const active = await session(req);
         if (active)
-          db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(
+          await db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(
             active.token_hash
           );
         return send(
@@ -287,14 +285,15 @@ export async function createApp(options = {}) {
         );
       }
       if (url.pathname === "/api/password" && req.method === "POST") {
-        const active = session(req);
+        const active = await session(req);
         if (!active) throw fail(401, "Avval admin sifatida kiring.");
-        consumeAttempt(req);
+        await consumeAttempt(req);
         const { currentPassword, newPassword } = await body(req);
+        const checkedHash = await currentHash();
         if (
           typeof currentPassword !== "string" ||
           currentPassword.length > 128 ||
-          !(await passwordMatches(currentPassword, currentHash()))
+          !(await passwordMatches(currentPassword, checkedHash))
         )
           throw fail(401, "Joriy parol noto‘g‘ri.");
         if (
@@ -304,25 +303,27 @@ export async function createApp(options = {}) {
         )
           throw fail(400, "Yangi parol 12–128 belgidan iborat bo‘lsin.");
         const hash = await passwordHash(newPassword);
-        db.exec("BEGIN IMMEDIATE");
+        const tx = await db.transaction();
         try {
-          db.prepare(
+          if (!(await session(req, tx)) || await currentHash(tx) !== checkedHash)
+            throw fail(401, 'Hisob o‘zgargan. Qayta kiring.');
+          await tx.prepare(
             "UPDATE settings SET value = ? WHERE key = 'admin_hash'"
           ).run(hash);
-          db.prepare("DELETE FROM sessions WHERE token_hash != ?").run(
+          await tx.prepare("DELETE FROM sessions WHERE token_hash != ?").run(
             active.token_hash
           );
-          db.exec("COMMIT");
+          await tx.prepare('DELETE FROM auth_attempts WHERE key = ?').run(attemptKey(req));
+          await tx.commit();
         } catch (error) {
-          db.exec("ROLLBACK");
+          await tx.rollback();
           throw error;
-        }
-        attempts.delete(req.socket.remoteAddress);
-        if (existsSync(bootstrapPath)) unlinkSync(bootstrapPath);
+        } finally { tx.close(); }
+        if (bootstrapPath && existsSync(bootstrapPath)) unlinkSync(bootstrapPath);
         return send(res, 200, { success: true });
       }
       if (url.pathname === "/api/payments" && req.method === "PATCH") {
-        if (!session(req))
+        if (!(await session(req)))
           throw fail(401, "To‘lovlarni faqat admin o‘zgartira oladi.");
         const { memberId, month, year, paid, version } = await body(req);
         if (
@@ -334,9 +335,10 @@ export async function createApp(options = {}) {
           version < 0
         )
           throw fail(400, "To‘lov ma’lumotlarini tekshiring.");
-        db.exec("BEGIN IMMEDIATE");
+        const tx = await db.transaction();
         try {
-          const previous = db
+          if (!(await session(req, tx))) throw fail(401, 'Avval admin sifatida kiring.');
+          const previous = await tx
             .prepare(
               "SELECT paid, version FROM payments WHERE year = ? AND member_id = ? AND month = ?"
             )
@@ -348,20 +350,20 @@ export async function createApp(options = {}) {
             );
           if (Boolean(previous?.paid) !== paid) {
             const now = new Date().toISOString();
-            db.prepare(
+            await tx.prepare(
               `INSERT INTO payments (year, member_id, month, paid, version, updated_at) VALUES (?, ?, ?, ?, ?, ?)
               ON CONFLICT(year, member_id, month) DO UPDATE SET paid = excluded.paid, version = excluded.version, updated_at = excluded.updated_at`
             ).run(year, memberId, month, Number(paid), version + 1, now);
-            db.prepare(
+            await tx.prepare(
               "INSERT INTO activity (year, member_id, month, paid, created_at) VALUES (?, ?, ?, ?, ?)"
             ).run(year, memberId, month, Number(paid), now);
           }
-          db.exec("COMMIT");
+          await tx.commit();
         } catch (error) {
-          db.exec("ROLLBACK");
+          await tx.rollback();
           throw error;
-        }
-        return send(res, 200, state(year));
+        } finally { tx.close(); }
+        return send(res, 200, await state(year));
       }
       if (url.pathname.startsWith("/api/"))
         throw fail(404, "Bunday so‘rov topilmadi.");
@@ -377,7 +379,7 @@ export async function createApp(options = {}) {
       }
       throw fail(404, "Sahifa topilmadi.");
     } catch (error) {
-      if (!error.status) console.error("Server error:", error.message);
+      if (!error.status) console.error("Server error:", error.code || error.name);
       if (!res.headersSent)
         send(res, error.status || 500, {
           error: error.status
@@ -386,12 +388,12 @@ export async function createApp(options = {}) {
         });
       else res.end();
     }
-  });
+  };
+  const server = http.createServer(handler);
   server.on("close", () => {
-    clearInterval(cleanup);
     db.close();
   });
-  return { server, bootstrapPath };
+  return { server, handler, bootstrapPath, close: () => db.close() };
 }
 
 if (
@@ -403,7 +405,7 @@ if (
   const host = process.env.HOST || "127.0.0.1";
   server.listen(port, host, () => {
     console.log(`11-B fond: http://${host}:${port}`);
-    if (existsSync(bootstrapPath))
+    if (bootstrapPath && existsSync(bootstrapPath))
       console.log(`Admin paroli faqat mahalliy faylda: ${bootstrapPath}`);
   });
   for (const signal of ["SIGINT", "SIGTERM"])

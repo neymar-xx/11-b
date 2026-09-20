@@ -4,11 +4,16 @@
   "private": true,
   "type": "module",
   "description": "11-B sinf fondi — himoyalangan to‘lovlar jadvali",
-  "engines": { "node": ">=22.13.0" },
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "start": "node --no-warnings server.mjs",
     "dev": "node --no-warnings --watch server.mjs",
     "check": "node --check server.mjs && node --check public/app.js && node --check lib/roster.mjs",
     "test": "node --no-warnings tests/server.test.mjs"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.18.0"
   }
 }

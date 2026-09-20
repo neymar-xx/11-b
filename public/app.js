@@ -68,6 +68,9 @@ async function api(url, options = {}) {
   } catch {
     throw new Error('Server bilan aloqa yo‘q. Internetni tekshirib, qayta urinib ko‘ring.');
   }
+  if (!response.headers.get('content-type')?.includes('application/json')) {
+    throw new Error('Saytning server qismi javob bermayapti. Fond mas’uli hosting sozlamalarini tekshirishi kerak.');
+  }
   let result;
   try { result = await response.json(); } catch { throw new Error('Server javobini o‘qib bo‘lmadi. Qayta urinib ko‘ring.'); }
   if (!response.ok) throw Object.assign(new Error(result.error || 'So‘rov bajarilmadi.'), { status: response.status });
